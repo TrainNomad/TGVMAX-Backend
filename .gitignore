@@ -1,0 +1,11 @@
+node_modules/
+
+# Données générées par le build (téléchargées/reconstruites au runtime
+# via GitHub Releases, voir server.js -> downloadDataFromRelease)
+engine_data/
+stations.json
+stations.csv
+tgvmax-data.tar.gz
+
+.env
+*.log

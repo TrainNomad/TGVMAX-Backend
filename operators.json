@@ -1,0 +1,9 @@
+[
+  {
+    "id": "TGVMAX",
+    "name": "TGVmax (SNCF)",
+    "api_url": "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/tgvmax/records",
+    "export_url": "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/tgvmax/exports/json?limit=-1&timezone=Europe%2FParis",
+    "note": "export_url est utilisé par tgvmax-ingest.js — retourne tout le dataset en un seul appel JSON, sans pagination."
+  }
+]

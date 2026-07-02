@@ -1,0 +1,4 @@
+# Git LFS retiré : les données volumineuses (engine_data/, stations.json,
+# stations.csv) ne sont plus versionnées du tout dans Git.
+# Elles sont générées par le workflow GitHub Actions et distribuées
+# via GitHub Releases (voir .github/workflows/update-tgvmax.yml).
