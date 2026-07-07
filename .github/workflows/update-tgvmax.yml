@@ -1,0 +1,85 @@
+name: Update TGVmax Data
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-tgvmax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Récupération du code ──────────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Configuration Node.js ─────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then
+            npm install
+          fi
+
+      # ── 3. Téléchargement de stations.csv (pour les coordonnées GPS) ─────────
+      - name: Download stations.csv
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/trainline-eu/stations/master/stations.csv" -o stations.csv
+          echo "✅ stations.csv prêt"
+
+      # ── 4. Ingestion + construction de l'index des gares ─────────────────────
+      # npm run build = tgvmax-ingest.js PUIS build-stations-index.js
+      - name: Run Build (ingest + stations index)
+        run: npm run build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      # ── 5. Vérification des fichiers critiques ────────────────────────────────
+      - name: Verify outputs
+        run: |
+          echo "=== Contenu de engine_data/ ==="
+          ls -lh engine_data/
+          for f in trips.json stops.json calendar_index.json meta.json; do
+            if [ ! -f "engine_data/$f" ]; then
+              echo "❌ Fichier critique manquant : engine_data/$f"
+              exit 1
+            fi
+          done
+          if [ ! -f "stations.json" ]; then
+            echo "❌ stations.json manquant à la racine"
+            exit 1
+          fi
+          echo "✅ Tous les fichiers nécessaires sont présents"
+
+      # ── 6. Compression des données dans une seule archive ────────────────────
+      - name: Compress data
+        run: |
+          tar -czf tgvmax-data.tar.gz engine_data/ stations.json stations.csv
+          echo "✅ Archive créée :"
+          ls -lh tgvmax-data.tar.gz
+
+      # ── 7. Publication sur GitHub Releases ────────────────────────────────────
+      # Le tag "data-latest" est réutilisé à chaque run : la release et son
+      # fichier attaché sont mis à jour (pas de nouvel historique qui grossit).
+      - name: Publish data to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: data-latest
+          name: "TGVmax data (auto-update)"
+          body: "Dernière mise à jour automatique : $(date -u +'%Y-%m-%d %H:%M UTC')"
+          draft: false
+          prerelease: false
+          files: tgvmax-data.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
