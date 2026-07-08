@@ -87,38 +87,37 @@ function loadJSON(filename) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
-// ─── Décompression des données (numéros → strings) ────────────────────────────────
-// Les données générées par tgvmax-ingest.js v3 sont "compressées" :
-// - stops: {0: {name, lat, lon}, 1: {...}, ...} (indices numériques)
-// - trips: {0: {o: 2, d: 5, t_dep: 1234, t_arr: 5678, dispo: 1}, ...}
+// ─── Décompression des données (numéros → objets enrichis) ───────────────────
+// Les données générées par tgvmax-ingest.js sont encodées numériquement :
+// - stops: {"0": {name, lat, lon}, "1": {...}, ...}  (clés = indices string)
+// - trips: {"0": {o: 2, d: 5, t_dep: 1234, t_arr: 5678, dispo: 1}, ...}
+// - routesByStop: {"0": [0, 3, 7], "2": [1, 5], ...}  (clés = indices stops)
 //
-// On les "décompresse" ici pour que le reste du code voie le format normal.
+// IMPORTANT : on garde les indices numériques (sous forme de strings) comme
+// stop_ids partout. "0", "1", "2"... sont les vrais IDs dans tout le système.
+// Inutile de les renommer : routesByStop utilise déjà ces clés numériques.
 function decompressTripsAndStops(tripsCompressed, stopsDict) {
-  // Inverser stops : de {0: {name, ...}} à {"STOP_NAME": {name, ...}}
-  const numIdToStopId = {};
+  // stops reste tel quel : {"0": {name, lat, lon}, ...}
+  // On enrichit juste chaque stop avec son id pour la résolution de noms.
   const stopsDecompressed = {};
-  
   for (const [numId, stopData] of Object.entries(stopsDict)) {
-    const stopId = `NUM_STOP:${numId}`;  // ID unique basé sur le numéro
-    numIdToStopId[numId] = stopId;
-    stopsDecompressed[stopId] = stopData;
+    stopsDecompressed[numId] = { ...stopData, id: numId };
   }
 
-  // Décompresser trips : {o, d, t_dep, t_arr, dispo} → {origin_id, dest_id, dep_time, arr_time, dispo}
+  // Décompresser trips : {o, d, t_dep, t_arr, dispo} → objet enrichi
+  // Les origin_id / dest_id sont les indices numériques STRING ("0", "2"...)
+  // qui correspondent directement aux clés de stopsDecompressed et routesByStop.
   const tripsDecompressed = {};
   for (const [tripNumId, tripCompressed] of Object.entries(tripsCompressed)) {
-    const originStopId = numIdToStopId[tripCompressed.o];
-    const destStopId = numIdToStopId[tripCompressed.d];
-    
     tripsDecompressed[tripNumId] = {
       trip_id:    tripNumId,
-      origin_id:  originStopId,
-      dest_id:    destStopId,
+      origin_id:  String(tripCompressed.o),
+      dest_id:    String(tripCompressed.d),
       dep_time:   tripCompressed.t_dep,
       arr_time:   tripCompressed.t_arr,
-      dispo:      tripCompressed.dispo === 1 ? true : false,
+      dispo:      tripCompressed.dispo === 1,
       operator:   'TGVMAX',
-      train_type: 'TGVMAX'
+      train_type: 'TGVMAX',
     };
   }
 
@@ -155,15 +154,21 @@ function initEngine() {
   // Construire un index date → [trip_ids] pour TOUS les trips (dispo ou non)
   allCalendarIndex = {};
   for (const [tripId, trip] of Object.entries(trips)) {
-    // Avec les données décompressées, on peut utiliser trip_meta pour la date
-    const tripNum = tripId;  // trip_id est maintenant un numéro
-    const dateKey = tripMeta[tripNum] ? tripMeta[tripNum].date : null;
-    
+    const dateKey = tripMeta[tripId] ? tripMeta[tripId].date : null;
     if (!dateKey) continue;
     if (!allCalendarIndex[dateKey]) allCalendarIndex[dateKey] = [];
     allCalendarIndex[dateKey].push(tripId);
   }
   console.log('  Index all-trips : ' + Object.keys(allCalendarIndex).length + ' dates');
+
+  // Vérification de cohérence : un sample de trip doit pointer vers un stop valide
+  const sampleTripIds = Object.keys(trips).slice(0, 3);
+  for (const tid of sampleTripIds) {
+    const t = trips[tid];
+    const origName = stops[t.origin_id]?.name || '⚠️ INTROUVABLE';
+    const destName = stops[t.dest_id]?.name   || '⚠️ INTROUVABLE';
+    console.log(`  [CHECK] trip ${tid}: ${origName} (${t.origin_id}) → ${destName} (${t.dest_id}) dispo=${t.dispo}`);
+  }
 
   buildStopsIndex();
 
@@ -278,9 +283,11 @@ function timeToSeconds(t) {
 }
 
 function resolveStopName(stopId) {
+  // D'abord chercher dans stopsIndex (stations.json avec vrais noms de villes)
   for (const station of stopsIndex) {
     if ((station.stopIds||[]).includes(stopId)) return station.name;
   }
+  // Fallback : stops.json (clé = indice numérique string)
   return (stops[stopId]?.name) || stopId;
 }
 
@@ -291,7 +298,7 @@ function resolveStopCoords(stopId) {
       return { lat: station.lat, lon: station.lon };
     }
   }
-  // Fallback stops.json brut
+  // Fallback stops.json (clé = indice numérique string)
   const s = stops[stopId];
   return { lat: s?.lat || 0, lon: s?.lon || 0 };
 }
