@@ -62,17 +62,17 @@ jobs:
           fi
           echo "✅ Tous les fichiers numériques et l'index sont présents"
 
-      # ── 6. Push des modifications directement sur la branche ──────────────────
+     # ── 6. Push des modifications directement sur la branche ──────────────────
       - name: Commit and Push to main branch
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # On ajoute le dossier de données RAPTOR et l'index des stations
-          git add engine_data/ stations.json
+          # On utilise -f pour passer outre le .gitignore de l'environnement de build
+          git add -f engine_data/ stations.json
           
-          # On vérifie s'il y a des changements à commiter pour éviter de faire échouer le script
-          if git diff --quiet && git diff --staged --quiet; then
+          # On vérifie s'il y a des changements à commiter
+          if git diff --quiet --staged; then
             echo "ℹ️ Aucun nouveau train TGVmax aujourd'hui. Dépôt déjà à jour."
           else
             git commit -m "🤖 Auto-update TGVmax data & stations index ($(date -u +'%Y-%m-%d'))"
