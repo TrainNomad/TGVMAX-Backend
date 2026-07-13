@@ -91,14 +91,6 @@ function downloadJson(exportUrl) {
   });
 }
 
-// Fonction pour convertir une date/heure de l'API en une clé Hexadécimale à 8 caractères
-function encodeDateToHex(dateString) {
-  if (!dateString) return '00000000';
-  const date = new Date(dateString);
-  const timestampInSeconds = Math.floor(date.getTime() / 1000); // Timestamp Unix
-  return timestampInSeconds.toString(16).toUpperCase();       // Ex: 6A56AD64
-}
-
 // ─── Normalisation d'un enregistrement TGVmax ────────────────────────────────
 
 function normalizeRecord(r) {
