@@ -1,0 +1,1 @@
+{"generated_at":"2026-07-13T20:49:24.902Z","source":"https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/tgvmax/exports/json?limit=-1&timezone=Europe%2FParis","operator":"TGVMAX","version":2,"total_records":436310,"total_trips":433661,"trips_dispo":34183,"trips_non_dispo":399478,"total_stops":339,"date_range":{"first":"2026-07-13","last":"2026-08-11","count":30}}
