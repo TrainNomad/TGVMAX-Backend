@@ -32,17 +32,46 @@ const PORT     = process.env.PORT     || 3000;
 const DATA_RELEASE_URL = process.env.DATA_RELEASE_URL ||
   'https://github.com/TrainNomad/TGVMAX-Backend/releases/download/data-latest/tgvmax-data.tar.gz';
 
-downloadDataFromRelease()
-  .then(() => {
-    initEngine();
-    server.listen(PORT, () => {
-      console.log(`🚀 Serveur actif sur le port ${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('❌ Impossible de démarrer le moteur TGVmax:', err);
-    process.exit(1);
+function downloadDataFromRelease() {
+  return new Promise((resolve, reject) => {
+    // Si les données existent déjà localement, pas besoin de retélécharger
+    if (fs.existsSync(path.join(DATA_DIR, 'meta.json'))) {
+      console.log('✅ Données déjà présentes localement dans :', DATA_DIR);
+      return resolve();
+    }
+
+    console.log(`📥 Téléchargement des données depuis : ${DATA_RELEASE_URL}`);
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    fetch(DATA_RELEASE_URL)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Erreur HTTP au téléchargement: ${response.status} ${response.statusText}`);
+        }
+        
+        // Décompression à la volée du flux tar.gz dans DATA_DIR
+        return new Promise((resExtract, rejExtract) => {
+          response.body
+            .pipe(zlib.createGunzip())
+            .pipe(tar.extract({ cwd: DATA_DIR, strip: 1 }))
+            .on('finish', () => {
+              console.log('📦 Données extraites avec succès !');
+              resExtract();
+            })
+            .on('error', (err) => {
+              rejExtract(err);
+            });
+        });
+      })
+      .then(() => resolve())
+      .catch(err => {
+        console.error('❌ Erreur lors du téléchargement/extraction des données :', err);
+        reject(err);
+      });
   });
+}
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
 let trips         = {};  // trip_id → trip object
