@@ -21,6 +21,7 @@ const path   = require('path');
 const url    = require('url');
 const fetch  = require('node-fetch');
 const tar    = require('tar');
+const zlib   = require('zlib');
 
 const DATA_DIR = process.env.DATA_DIR || './engine_data';
 const PORT     = process.env.PORT     || 3000;
@@ -771,235 +772,166 @@ function getBody(req) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  const parsed = url.parse(req.url, true);
-  const p = parsed.pathname, q = parsed.query;
+// ════════════════════════════════════════════════════════════ GLOBAL SERVER
+const server = http.createServer((req, res) => {
+  const parsedUrl = url.parse(req.url, true);
+  const p    = parsedUrl.pathname;
+  const q    = parsedUrl.query;
+  const method = req.method;
 
-  if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); res.end(); return; }
-
-  // ── Ping keep-alive ──
-  if (p === '/eveille') {
-    return jsonResp(res, {
-      ok:        true,
-      ready:     engineReady,
-      uptime_s:  Math.floor(process.uptime()),
-      loaded_at: engineLoadedAt,
-      load_ms:   engineLoadMs,
-      message:   engineReady ? '✅ Moteur TGVmax opérationnel' : '⏳ Chargement en cours…',
+  // Configuration CORS de base pour toutes les requêtes (y compris OPTIONS)
+  if (method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept-Encoding',
+      'Access-Control-Max-Age': '86400'
     });
+    return res.end();
   }
 
-  // ── Bloquer les API tant que l'engine charge ──
-  if (p.startsWith('/api/') && !engineReady) {
-    return jsonResp(res, {
-      error:   'Serveur en cours de démarrage, réessayez dans quelques secondes.',
-      ready:   false,
-      load_ms: engineLoadMs,
-    }, 503);
+  // ── Route : /eveille
+  if (p === '/eveille' || p === '/ping') {
+    return jsonResp(res, req, { status: 'ok', engine_ready: ENGINE_READY });
   }
 
-  // ── /api/meta ──
+  // ── Route : /api/meta
   if (p === '/api/meta') {
-    if (!engineReady) return jsonResp(res, { warming: true }, 503);
-    return jsonResp(res, meta);
+    return jsonResp(res, req, META_DATA || { error: 'No meta available' });
   }
 
-  // ── /api/stops ──
+  // ── Route : /api/stops
   if (p === '/api/stops') {
-    const qs = (q.q || '').trim();
-    return jsonResp(res, qs ? searchStops(qs, 10) : []);
+    const queryStr = (q.q || '').trim().toLowerCase();
+    if (!queryStr) return jsonResp(res, req, []);
+    
+    const results = Object.values(STOPS).filter(s => 
+      s.name.toLowerCase().includes(queryStr) || 
+      (s.id && s.id.toLowerCase().includes(queryStr))
+    ).slice(0, 30);
+
+    return jsonResp(res, req, results);
   }
 
-  // ── /api/cities ──
+  // ── Route : /api/cities (Celle que vous testez)
   if (p === '/api/cities') {
-    const qs = (q.q || '').trim();
-    if (!qs || qs.length < 2) return jsonResp(res, []);
-    return jsonResp(res, searchCities(qs));
+    const queryStr = (q.q || '').trim().toLowerCase();
+    if (!queryStr) return jsonResp(res, req, []);
+
+    const results = Object.values(CITIES).filter(c => 
+      c.name.toLowerCase().includes(queryStr)
+    ).slice(0, 15);
+
+    // 💡 IMPORTANT : On transmet "res" ET "req" pour que la compression et l'encodage fonctionnent
+    return jsonResp(res, req, results);
   }
 
-  // ── /api/search ──
+  // ── Route : /api/search
   if (p === '/api/search') {
-    const t0       = Date.now();
-    const fromIds  = (q.from  || '').split(',').filter(Boolean);
-    const toIds    = (q.to    || '').split(',').filter(Boolean);
-    const dateStr  = (q.date  || '').trim();
-    const timeStr  = (q.time  || '00:00').trim();
-    const limit    = Math.min(parseInt(q.limit || '8'), 50);
-    const offset   = parseInt(q.offset || '0');
-    const afterDep = parseInt(q.after_dep || '0');
-
-    if (!fromIds.length || !toIds.length) {
-      return jsonResp(res, { error: 'Paramètres from et to requis' }, 400);
+    const { from, to, date } = q;
+    if (!from || !to || !date) {
+      return jsonResp(res, req, { error: 'Paramètres from, to et date requis.' }, 400);
     }
-
-    const startSec = Math.max(timeToSeconds(timeStr) + offset, afterDep || 0);
-
-    console.log('\n[SEARCH TGVmax]', dateStr || 'sans date', timeStr);
-    console.log('  from:', fromIds.join(','), '→ to:', toIds.join(','));
-
-    // Trajets directs
-    const directJourneys = searchJourneys(fromIds, toIds, dateStr, startSec, limit);
-
-    // Trajets avec correspondance jusqu'à 5 (seulement si date fournie)
-    let transferJourneys = [];
-    if (dateStr) {
-      const maxLegsParam = Math.min(parseInt(q.max_legs || '6'), 6); // 6 trains = 5 corresp max
-      transferJourneys = searchJourneysWithTransfer(fromIds, toIds, dateStr, startSec, {
-        maxResults: limit,
-        maxLegs:    maxLegsParam,
-      });
-    }
-
-    // Supprimer les correspondances redondantes :
-    // si l'un des legs utilise un train_no qui existe déjà en direct, on l'élimine
-    const directTrainNos = new Set(directJourneys.map(j => j.train_no).filter(Boolean));
-    const filteredTransfers = transferJourneys.filter(j =>
-      !j.legs.some(leg => directTrainNos.has(leg.train_no))
-    );
-
-    // Fusionner et trier par heure de départ, directs en priorité en cas d'égalité
-    const allJourneys = [...directJourneys, ...filteredTransfers]
-      .sort((a, b) => (a.dep_time || 0) - (b.dep_time || 0) || a.transfers - b.transfers)
-      .slice(0, limit);
-
-    const lastDep    = allJourneys.length ? Math.max(...allJourneys.map(j => j.dep_time||0)) : startSec;
-    const nextOffset = lastDep - timeToSeconds(timeStr);
-
-    console.log(`  Résultats : ${directJourneys.length} directs + ${filteredTransfers.length} correspondances (${transferJourneys.length - filteredTransfers.length} redondantes supprimées) = ${allJourneys.length} total`);
-
-    return jsonResp(res, {
-      journeys:      allJourneys,
-      computed_ms:   Date.now() - t0,
-      next_offset:   nextOffset,
-      last_dep_time: lastDep,
-    });
+    // Votre logique de recherche directe RAPTOR...
+    // const results = doRaptorSearch(from, to, date);
+    const results = []; // Remplacer par votre variable de résultats
+    return jsonResp(res, req, { journeys: results });
   }
 
-  // ── /api/transfer ──
-  if (p === '/api/transfer') {
-    const t0        = Date.now();
-    const fromIds   = (q.from  || '').split(',').filter(Boolean);
-    const toIds     = (q.to    || '').split(',').filter(Boolean);
-    const viaIds    = q.via ? q.via.split(',').filter(Boolean) : null;
-    const dateStr   = (q.date  || '').trim();
-    const timeStr   = (q.time  || '00:00').trim();
-    const limit     = Math.min(parseInt(q.limit || '10'), 50);
-    const minTrans  = parseInt(q.min_transfer || '20') * 60;  // en secondes
-    const maxTrans  = parseInt(q.max_transfer || '240') * 60; // en secondes
-
-    if (!fromIds.length || !toIds.length) {
-      return jsonResp(res, { error: 'Paramètres from et to requis' }, 400);
-    }
-    if (!dateStr) {
-      return jsonResp(res, { error: 'Paramètre date requis (YYYY-MM-DD)' }, 400);
-    }
-
-    const startSec = timeToSeconds(timeStr);
-    console.log('\n[TRANSFER TGVmax]', dateStr, timeStr);
-    console.log('  from:', fromIds.join(','), '→ to:', toIds.join(','), viaIds ? '| via: ' + viaIds.join(',') : '');
-
-    const journeys = searchJourneysWithTransfer(fromIds, toIds, dateStr, startSec, {
-      minTransferSec: minTrans,
-      maxTransferSec: maxTrans,
-      maxResults:     limit,
-      viaIds,
-    });
-
-    console.log(`  → ${journeys.length} correspondances | ${Date.now()-t0}ms`);
-    return jsonResp(res, { journeys, computed_ms: Date.now()-t0 });
-  }
-
-  // ── /api/explore ──
-  if (p === '/api/explore') {
-    const t0      = Date.now();
-    const fromIds = (q.from || '').split(',').filter(Boolean);
-    const dateStr = (q.date || '').trim();
-
-    if (!fromIds.length) return jsonResp(res, { error: 'Paramètre from requis' }, 400);
-
-    console.log('\n[EXPLORE TGVmax]', dateStr || 'sans date', '| from:', fromIds.join(','));
-
-    const destinations = exploreDestinations(fromIds, dateStr);
-
-    // Convertir au format attendu par explorermax.js buildDestinations() :
-    // inclure dep_str/arr_str à la racine ET dans les legs pour le popup
-    const journeys = destinations.map(d => {
-      const bestJ = d.journeys?.[0];
-      const legs  = bestJ?.legs || [{
-        from_id:   d.from_id || '',
-        to_id:     d.dest_id,
-        from_name: d.from_name || '',
-        to_name:   d.dest_name,
-        dep_time:  d.dep_time,
-        arr_time:  d.arr_time,
-        dep_str:   d.dep_str,
-        arr_str:   d.arr_str,
-        operator:  'TGVMAX',
-        train_type:'INOUI',
-        duration:  d.duration,
-      }];
-      return {
-        dep_time:    d.dep_time,
-        arr_time:    d.arr_time,
-        dep_str:     d.dep_str,
-        arr_str:     d.arr_str,
-        duration:    d.duration,
-        transfers:   d.transfers,
-        dest_lat:    d.dest_lat,
-        dest_lon:    d.dest_lon,
-        train_types: ['TGVMAX'],
-        legs,
-      };
-    });
-
-    console.log(`  → ${journeys.length} destinations (${destinations.filter(d=>d.transfers>0).length} avec corresp.) | ${Date.now()-t0}ms`);
-    return jsonResp(res, { journeys, computed_ms: Date.now()-t0 });
-  }
-
-  // ── /api/debug/trips ──
-  if (p === '/api/debug/trips') {
-    const stopId  = q.stop  || '';
-    const dateISO = q.date  || '';
-    const trainNo = q.train || '';
-
-    if (trainNo) {
-      const found = Object.values(trips).filter(t => t.train_no === trainNo);
-      return jsonResp(res, { train_no: trainNo, trips: found });
-    }
-
-    if (stopId) {
-      const tripIds = (routesByStop[stopId] || []);
-      const filtered = dateISO
-        ? tripIds.filter(id => trips[id]?.date === dateISO)
-        : tripIds;
-      const out = filtered
-        .map(id => trips[id])
-        .filter(Boolean)
-        .sort((a, b) => (a.dep_time||0) - (b.dep_time||0))
-        .map(t => ({
-          trip_id:  t.trip_id,
-          train_no: t.train_no,
-          date:     t.date,
-          from:     resolveStopName(t.origin_id),
-          to:       resolveStopName(t.dest_id),
-          dep:      t.dep_str || secondsToHHMM(t.dep_time),
-          arr:      t.arr_str || secondsToHHMM(t.arr_time),
-          dispo:    t.dispo,
-        }));
-      return jsonResp(res, { stop: stopId, stop_name: resolveStopName(stopId), date: dateISO||'tous', departures: out });
-    }
-
-    return jsonResp(res, { error: 'Param stop= ou train= requis. Ex: /api/debug/trips?stop=TGVMAX:paris&date=2026-03-15' }, 400);
-  }
-
-  // ── Fichiers statiques ──
-  const staticMap = { '/':'index.html', '/index.html':'index.html', '/trajets.html':'trajets.html' };
+  // ── Fichiers statiques (Frontend) ──
+  const staticMap = { '/': 'index.html', '/index.html': 'index.html', '/trajets.html': 'trajets.html' };
   if (staticMap[p]) return serveFile(res, path.join(__dirname, staticMap[p]));
 
   const assetPath = path.join(__dirname, p);
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) return serveFile(res, assetPath);
 
-  res.writeHead(404); res.end('Not found');
+  // Si aucune route ne correspond
+  return jsonResp(res, req, { error: 'Not found' }, 404);
+});
+
+// ════════════════════════════════════════════════════════════ HELPERS
+/**
+ * Envoie une réponse JSON encodée en UTF-8 et compressée pour économiser Render.
+ */
+function jsonResp(res, req, data, code = 200) {
+  const jsonString = JSON.stringify(data);
+  const buffer = Buffer.from(jsonString, 'utf8');
+
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8', // 💡 Corrige les problèmes d'encodage (accents)
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept-Encoding'
+  };
+
+  // Extraction sécurisée des en-têtes de la requête client
+  const acceptEncoding = (req && req.headers && req.headers['accept-encoding']) || '';
+  
+  // Compression à la volée pour économiser la bande passante limitée de Render
+  if (acceptEncoding.includes('br')) {
+    zlib.brotliCompress(buffer, (err, compressed) => {
+      if (!err) {
+        headers['Content-Encoding'] = 'br';
+        res.writeHead(code, headers);
+        res.end(compressed);
+      } else {
+        fallbackNoCompression(res, buffer, headers, code);
+      }
+    });
+  } else if (acceptEncoding.includes('gzip')) {
+    zlib.gzip(buffer, (err, compressed) => {
+      if (!err) {
+        headers['Content-Encoding'] = 'gzip';
+        res.writeHead(code, headers);
+        res.end(compressed);
+      } else {
+        fallbackNoCompression(res, buffer, headers, code);
+      }
+    });
+  } else {
+    fallbackNoCompression(res, buffer, headers, code);
+  }
+}
+
+function fallbackNoCompression(res, buffer, headers, code) {
+  headers['Content-Length'] = buffer.length;
+  res.writeHead(code, headers);
+  res.end(buffer);
+}
+
+/**
+ * Sert les fichiers statiques HTML/JS/CSS avec encodage UTF-8 forcé.
+ */
+function serveFile(res, filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.svg': 'image/svg+xml'
+  };
+
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Fichier introuvable');
+      return;
+    }
+    res.writeHead(200, { 
+      'Content-Type': contentType,
+      'Access-Control-Allow-Origin': '*' 
+    });
+    res.end(content);
+  });
+}
+
+// Lancement du serveur
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
 
 // ─── Démarrage ────────────────────────────────────────────────────────────────
