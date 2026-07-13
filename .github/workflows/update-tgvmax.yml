@@ -39,7 +39,7 @@ jobs:
           echo "✅ stations.csv prêt"
 
       # ── 4. Ingestion + construction de l'index des gares ─────────────────────
-      # npm run build = tgvmax-ingest.js PUIS build-stations-index.js
+      # npm run build exécute l'ingestion brute et crée l'index numérique
       - name: Run Build (ingest + stations index)
         run: npm run build
         env:
@@ -60,26 +60,22 @@ jobs:
             echo "❌ stations.json manquant à la racine"
             exit 1
           fi
-          echo "✅ Tous les fichiers nécessaires sont présents"
+          echo "✅ Tous les fichiers numériques et l'index sont présents"
 
-      # ── 6. Compression des données dans une seule archive ────────────────────
-      - name: Compress data
+      # ── 6. Push des modifications directement sur la branche ──────────────────
+      - name: Commit and Push to main branch
         run: |
-          tar -czf tgvmax-data.tar.gz engine_data/ stations.json stations.csv
-          echo "✅ Archive créée :"
-          ls -lh tgvmax-data.tar.gz
-
-      # ── 7. Publication sur GitHub Releases ────────────────────────────────────
-      # Le tag "data-latest" est réutilisé à chaque run : la release et son
-      # fichier attaché sont mis à jour (pas de nouvel historique qui grossit).
-      - name: Publish data to GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: data-latest
-          name: "TGVmax data (auto-update)"
-          body: "Dernière mise à jour automatique : $(date -u +'%Y-%m-%d %H:%M UTC')"
-          draft: false
-          prerelease: false
-          files: tgvmax-data.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # On ajoute le dossier de données RAPTOR et l'index des stations
+          git add engine_data/ stations.json
+          
+          # On vérifie s'il y a des changements à commiter pour éviter de faire échouer le script
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "ℹ️ Aucun nouveau train TGVmax aujourd'hui. Dépôt déjà à jour."
+          else
+            git commit -m "🤖 Auto-update TGVmax data & stations index ($(date -u +'%Y-%m-%d'))"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "✅ Données poussées avec succès sur la branche."
+          fi
