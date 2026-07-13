@@ -1,87 +1,56 @@
+/**
+ * build-stations-index.js
+ * Construit un stations.json unique et dédoublonné basé STRICTEMENT sur le CSV.
+ */
+
 'use strict';
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 const matcher = require('./stations-matcher');
 
 const DATA_DIR   = process.argv[2] || './engine_data';
 const OUT_FILE   = process.argv[3] || path.join(__dirname, 'stations.json');
 const CSV_FILE   = process.argv[4] || path.join(__dirname, 'stations.csv');
-const STOPS_FILE = path.join(DATA_DIR, 'stops.json');
+const STOPS_FILE = path.join(DATA_DIR, 'stops.json'); // Fichier contenant les stops extraits de l'API
 
-// 1. Initialisation du matcher qui lit le fichier stations.csv
+// 1. Initialiser le matcher avec le CSV
 matcher.load(CSV_FILE);
 
 if (!fs.existsSync(STOPS_FILE)) {
-  console.error(`❌ Fichier introuvable : ${STOPS_FILE}. Veuillez lancer l'ingestion d'abord.`);
+  console.error("❌ Le fichier des arrêts de l'API (stops.json) n'existe pas encore. Lancez l'ingestion d'abord.");
   process.exit(1);
 }
 
-const stops = JSON.parse(fs.readFileSync(STOPS_FILE, 'utf8'));
-const stationsMap = new Map();
+const apiStops = JSON.parse(fs.readFileSync(STOPS_FILE, 'utf8'));
 
-function normalize(str) {
-  return (str || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// Utilisation d'un Map pour garantir l'unicité stricte par code UIC
+const uniqueStations = new Map();
 
-console.log('⏳ Génération du fichier stations.json basé sur les codes IATA...');
+Object.keys(apiStops).forEach(sncfId => {
+  // apiStops contient les clés correspondant aux origine_iata / destination_iata de la SNCF
+  const csvMatch = matcher.matchBySncfId(sncfId);
 
-// 2. Traitement de chaque gare présente dans le moteur RAPTOR (stops.json)
-for (const [stopId, stop] of Object.entries(stops)) {
-  const rawName = stop.name; // Ex: "PARIS-MONTPARNASSE 1 ET 2" ou "PARIS GARE DE LYON"
-  
-  // Utilise votre matcher existant pour trouver l'entrée IATA correspondante dans le CSV
-  const matched = matcher.match(rawName);
-  
-  let finalId, finalName, finalLat, finalLon, finalCity;
-  
-  if (matched) {
-    // Si la gare est trouvée dans le CSV via son IATA (ex: id = "FRPMP")
-    // On convertit "FRPMP" en un id propre et lisible "FR:pmp"
-    finalId   = 'FR:' + matched.id.replace(/^FR/i, '').toLowerCase(); 
-    finalName = matched.name; // Prend le vrai nom propre du CSV (ex: "Paris Montparnasse")
-    finalLat  = matched.lat;  // Latitude exacte du CSV
-    finalLon  = matched.lon;  // Longitude exacte du CSV
-    finalCity = matched.name; // On force la ville à être la gare elle-même pour différencier Paris
-  } else {
-    // Rétrocompatibilité (Fallback) si une gare RAPTOR n'est pas trouvée dans le CSV
-    finalId   = 'FR:' + normalize(rawName).replace(/\s+/g, '-');
-    finalName = rawName;
-    finalLat  = stop.lat || 0;
-    finalLon  = stop.lon || 0;
-    finalCity = stop.city || rawName;
-  }
+  if (csvMatch && csvMatch.uic) {
+    const uicKey = csvMatch.uic;
 
-  // 3. Regroupement intelligent par code IATA unique
-  if (!stationsMap.has(finalId)) {
-    stationsMap.set(finalId, {
-      id: finalId,               // ex: "FR:ply"
-      name: finalName,           // ex: "Paris Gare de Lyon"
-      city: finalCity,           // ex: "Paris Gare de Lyon" -> Fini le regroupement global
-      country: 'FR',
-      stopIds: [stopId],         // On lie l'identifiant court du moteur RAPTOR
-      operators: ['TGVMAX'],
-      lat: finalLat,
-      lon: finalLon
-    });
-  } else {
-    // Si plusieurs entités RAPTOR pointent vers le même code IATA, on fusionne leurs stopIds
-    const existing = stationsMap.get(finalId);
-    if (!existing.stopIds.includes(stopId)) {
-      existing.stopIds.push(stopId);
+    // Si la gare n'est pas encore enregistrée, on l'ajoute (évite les répétitions)
+    if (!uniqueStations.has(uicKey)) {
+      uniqueStations.set(uicKey, {
+        id: uicKey, // L'identifiant bien défini devient l'UIC (colonne D)
+        name: csvMatch.name,
+        lat: csvMatch.lat,
+        lon: csvMatch.lon,
+        sncf_id: sncfId // Optionnel : garde une trace du code API d'origine
+      });
     }
+  } else {
+    console.warn(`[Ignore] Aucune correspondance stricte dans le CSV pour le code SNCF: ${sncfId}`);
   }
-}
+});
 
-const stations = Array.from(stationsMap.values());
+// Conversion du Map en tableau pour l'écriture finale
+const stationsResult = Array.from(uniqueStations.values());
 
-// 4. Écriture finale dans stations.json
-fs.writeFileSync(OUT_FILE, JSON.stringify(stations, null, 2), 'utf8');
-
-console.log(`\n✅ stations.json généré avec succès !`);
-console.log(`  Total de gares uniques différenciées : ${stations.length}`);
+fs.writeFileSync(OUT_FILE, JSON.stringify(stationsResult, null, 2), 'utf8');
+console.log(`\n✅ stations.json généré avec succès : ${stationsResult.length} gares uniques (Indexées par UIC).`);
