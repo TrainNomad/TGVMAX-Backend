@@ -21,7 +21,7 @@ const path   = require('path');
 const url    = require('url');
 const fetch  = require('node-fetch');
 const tar    = require('tar');
-const zlib   = require('zlib');
+const zlib   = require('zlib'); // 💡 À ajouter ou vérifier
 
 const DATA_DIR = process.env.DATA_DIR || './engine_data';
 const PORT     = process.env.PORT     || 3000;
@@ -32,35 +32,17 @@ const PORT     = process.env.PORT     || 3000;
 const DATA_RELEASE_URL = process.env.DATA_RELEASE_URL ||
   'https://github.com/TrainNomad/TGVMAX-Backend/releases/download/data-latest/tgvmax-data.tar.gz';
 
-async function downloadDataFromRelease() {
-  // Si les données sont déjà présentes en local (dev, ou déjà téléchargées
-  // lors d'un précédent démarrage du même conteneur), on ne retélécharge pas.
-  const metaFile = path.join(DATA_DIR, 'meta.json');
-  if (fs.existsSync(metaFile)) {
-    console.log('ℹ️  Données déjà présentes localement, téléchargement ignoré.');
-    return;
-  }
-
-  console.log('📥 Téléchargement des données TGVmax depuis GitHub Releases...');
-  const res = await fetch(DATA_RELEASE_URL, { redirect: 'follow' });
-  if (!res.ok) {
-    throw new Error(`Échec du téléchargement (${res.status} ${res.statusText}) : ${DATA_RELEASE_URL}`);
-  }
-
-  const archivePath = path.join(__dirname, 'tgvmax-data.tar.gz');
-  await new Promise((resolve, reject) => {
-    const dest = fs.createWriteStream(archivePath);
-    res.body.pipe(dest);
-    res.body.on('error', reject);
-    dest.on('finish', resolve);
-    dest.on('error', reject);
+downloadDataFromRelease()
+  .then(() => {
+    initEngine();
+    server.listen(PORT, () => {
+      console.log(`🚀 Serveur actif sur le port ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('❌ Impossible de démarrer le moteur TGVmax:', err);
+    process.exit(1);
   });
-
-  console.log('📦 Extraction de l\'archive...');
-  await tar.x({ file: archivePath, cwd: __dirname });
-  fs.unlinkSync(archivePath);
-  console.log('✅ Données TGVmax prêtes.');
-}
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
 let trips         = {};  // trip_id → trip object
@@ -752,10 +734,45 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
-function jsonResp(res, data, status=200) {
-  cors(res);
-  res.writeHead(status, { 'Content-Type':'application/json' });
-  res.end(JSON.stringify(data));
+function jsonResp(res, req, data, code = 200) {
+  const jsonString = JSON.stringify(data);
+  const buffer = Buffer.from(jsonString, 'utf8');
+
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8', 
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept-Encoding'
+  };
+
+  const acceptEncoding = (req && req.headers && req.headers['accept-encoding']) || '';
+  
+  if (acceptEncoding.includes('br')) {
+    zlib.brotliCompress(buffer, (err, compressed) => {
+      if (!err) {
+        headers['Content-Encoding'] = 'br';
+        res.writeHead(code, headers);
+        return res.end(compressed);
+      }
+      fallbackNoCompression(res, buffer, headers, code);
+    });
+  } else if (acceptEncoding.includes('gzip')) {
+    zlib.gzip(buffer, (err, compressed) => {
+      if (!err) {
+        headers['Content-Encoding'] = 'gzip';
+        res.writeHead(code, headers);
+        return res.end(compressed);
+      }
+      fallbackNoCompression(res, buffer, headers, code);
+    });
+  } else {
+    fallbackNoCompression(res, buffer, headers, code);
+  }
+}
+
+function fallbackNoCompression(res, buffer, headers, code) {
+  headers['Content-Length'] = buffer.length;
+  res.writeHead(code, headers);
+  res.end(buffer);
 }
 function serveFile(res, fp) {
   if (!fs.existsSync(fp)) { res.writeHead(404); res.end('Not found'); return; }
@@ -772,14 +789,12 @@ function getBody(req) {
   });
 }
 
-// ════════════════════════════════════════════════════════════ GLOBAL SERVER
 const server = http.createServer((req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const p    = parsedUrl.pathname;
   const q    = parsedUrl.query;
   const method = req.method;
 
-  // Configuration CORS de base pour toutes les requêtes (y compris OPTIONS)
   if (method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
@@ -792,146 +807,53 @@ const server = http.createServer((req, res) => {
 
   // ── Route : /eveille
   if (p === '/eveille' || p === '/ping') {
-    return jsonResp(res, req, { status: 'ok', engine_ready: ENGINE_READY });
+    return jsonResp(res, req, { status: 'ok', engine_ready: engineReady });
   }
 
   // ── Route : /api/meta
   if (p === '/api/meta') {
-    return jsonResp(res, req, META_DATA || { error: 'No meta available' });
+    return jsonResp(res, req, meta || { error: 'No meta available' });
   }
 
   // ── Route : /api/stops
   if (p === '/api/stops') {
-    const queryStr = (q.q || '').trim().toLowerCase();
+    const queryStr = (q.q || '').trim();
     if (!queryStr) return jsonResp(res, req, []);
     
-    const results = Object.values(STOPS).filter(s => 
-      s.name.toLowerCase().includes(queryStr) || 
-      (s.id && s.id.toLowerCase().includes(queryStr))
-    ).slice(0, 30);
-
+    const results = searchStops(queryStr, 30);
     return jsonResp(res, req, results);
   }
 
-  // ── Route : /api/cities (Celle que vous testez)
+  // ── Route : /api/cities
   if (p === '/api/cities') {
-    const queryStr = (q.q || '').trim().toLowerCase();
+    const queryStr = (q.q || '').trim();
     if (!queryStr) return jsonResp(res, req, []);
 
-    const results = Object.values(CITIES).filter(c => 
-      c.name.toLowerCase().includes(queryStr)
-    ).slice(0, 15);
-
-    // 💡 IMPORTANT : On transmet "res" ET "req" pour que la compression et l'encodage fonctionnent
+    const results = searchCities(queryStr);
     return jsonResp(res, req, results);
   }
 
   // ── Route : /api/search
   if (p === '/api/search') {
-    const { from, to, date } = q;
+    const { from, to, date, time } = q;
     if (!from || !to || !date) {
       return jsonResp(res, req, { error: 'Paramètres from, to et date requis.' }, 400);
     }
-    // Votre logique de recherche directe RAPTOR...
-    // const results = doRaptorSearch(from, to, date);
-    const results = []; // Remplacer par votre variable de résultats
+    const startTimeSec = timeToSeconds(time || '00:00');
+    const fromIds = from.split(',');
+    const toIds = to.split(',');
+    const results = searchJourneys(fromIds, toIds, date, startTimeSec);
     return jsonResp(res, req, { journeys: results });
   }
 
-  // ── Fichiers statiques (Frontend) ──
+  // ── Fichiers statiques (Frontend)
   const staticMap = { '/': 'index.html', '/index.html': 'index.html', '/trajets.html': 'trajets.html' };
   if (staticMap[p]) return serveFile(res, path.join(__dirname, staticMap[p]));
 
   const assetPath = path.join(__dirname, p);
   if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) return serveFile(res, assetPath);
 
-  // Si aucune route ne correspond
   return jsonResp(res, req, { error: 'Not found' }, 404);
-});
-
-// ════════════════════════════════════════════════════════════ HELPERS
-/**
- * Envoie une réponse JSON encodée en UTF-8 et compressée pour économiser Render.
- */
-function jsonResp(res, req, data, code = 200) {
-  const jsonString = JSON.stringify(data);
-  const buffer = Buffer.from(jsonString, 'utf8');
-
-  const headers = {
-    'Content-Type': 'application/json; charset=utf-8', // 💡 Corrige les problèmes d'encodage (accents)
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept-Encoding'
-  };
-
-  // Extraction sécurisée des en-têtes de la requête client
-  const acceptEncoding = (req && req.headers && req.headers['accept-encoding']) || '';
-  
-  // Compression à la volée pour économiser la bande passante limitée de Render
-  if (acceptEncoding.includes('br')) {
-    zlib.brotliCompress(buffer, (err, compressed) => {
-      if (!err) {
-        headers['Content-Encoding'] = 'br';
-        res.writeHead(code, headers);
-        res.end(compressed);
-      } else {
-        fallbackNoCompression(res, buffer, headers, code);
-      }
-    });
-  } else if (acceptEncoding.includes('gzip')) {
-    zlib.gzip(buffer, (err, compressed) => {
-      if (!err) {
-        headers['Content-Encoding'] = 'gzip';
-        res.writeHead(code, headers);
-        res.end(compressed);
-      } else {
-        fallbackNoCompression(res, buffer, headers, code);
-      }
-    });
-  } else {
-    fallbackNoCompression(res, buffer, headers, code);
-  }
-}
-
-function fallbackNoCompression(res, buffer, headers, code) {
-  headers['Content-Length'] = buffer.length;
-  res.writeHead(code, headers);
-  res.end(buffer);
-}
-
-/**
- * Sert les fichiers statiques HTML/JS/CSS avec encodage UTF-8 forcé.
- */
-function serveFile(res, filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  const mimeTypes = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.svg': 'image/svg+xml'
-  };
-
-  const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-  fs.readFile(filePath, (err, content) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Fichier introuvable');
-      return;
-    }
-    res.writeHead(200, { 
-      'Content-Type': contentType,
-      'Access-Control-Allow-Origin': '*' 
-    });
-    res.end(content);
-  });
-}
-
-// Lancement du serveur
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
 
 // ─── Démarrage ────────────────────────────────────────────────────────────────
