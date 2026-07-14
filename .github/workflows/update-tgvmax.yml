@@ -38,21 +38,22 @@ jobs:
           curl -fsSL "https://raw.githubusercontent.com/trainline-eu/stations/master/stations.csv" -o stations.csv
           echo "✅ stations.csv prêt"
 
-      # ── 4. Ingestion + construction de l'index des gares ─────────────────────
-      # npm run build exécute l'ingestion brute et crée l'index numérique
-      - name: Run Build (ingest + stations index)
+      # ── 4. Ingestion brute, Encodage binaire et indexation ───────────────────
+      # npm run build exécute l'ingestion et génère les fichiers binaires + JSON
+      - name: Run Build (ingest + binary encoding)
         run: npm run build
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
 
-      # ── 5. Vérification des fichiers critiques ────────────────────────────────
+      # ── 5. Vérification des fichiers critiques (Adaptée au format binaire) ───
       - name: Verify outputs
         run: |
           echo "=== Contenu de engine_data/ ==="
           ls -lh engine_data/
-          for f in trips.json stops.json calendar_index.json meta.json; do
+          # REMPLACEMENT : On vérifie trips.bin et trip_meta.json à la place de trips.json
+          for f in trips.bin trip_meta.json stops.json calendar_index.json meta.json; do
             if [ ! -f "engine_data/$f" ]; then
-              echo "❌ Fichier critique manquant : engine_data/$f"
+              echo "❌ Fichier critique binaire/JSON manquant : engine_data/$f"
               exit 1
             fi
           done
@@ -60,22 +61,22 @@ jobs:
             echo "❌ stations.json manquant à la racine"
             exit 1
           fi
-          echo "✅ Tous les fichiers numériques et l'index sont présents"
+          echo "✅ Tous les fichiers binaires, métadonnées et l'index sont présents"
 
-     # ── 6. Push des modifications directement sur la branche ──────────────────
+      # ── 6. Push des modifications directement sur la branche ──────────────────
       - name: Commit and Push to main branch
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # On utilise -f pour passer outre le .gitignore de l'environnement de build
+          # On ajoute de force le dossier engine_data contenant trips.bin et stations.json
           git add -f engine_data/ stations.json
           
           # On vérifie s'il y a des changements à commiter
           if git diff --quiet --staged; then
             echo "ℹ️ Aucun nouveau train TGVmax aujourd'hui. Dépôt déjà à jour."
           else
-            git commit -m "🤖 Auto-update TGVmax data & stations index ($(date -u +'%Y-%m-%d'))"
+            git commit -m "🤖 Auto-update TGVmax binaire & stations index ($(date -u +'%Y-%m-%d'))"
             git push origin HEAD:${{ github.ref_name }}
-            echo "✅ Données poussées avec succès sur la branche."
+            echo "✅ Données binaires poussées avec succès sur la branche."
           fi
