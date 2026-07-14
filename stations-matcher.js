@@ -85,5 +85,6 @@ function matchBySncfId(sncfId) {
 
 module.exports = {
   load,
-  matchBySncfId
+  matchBySncfId,
+  match: matchBySncfId // <-- Crée un alias "match" qui pointe vers matchBySncfId
 };
