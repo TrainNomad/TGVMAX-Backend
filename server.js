@@ -74,13 +74,13 @@ function downloadDataFromRelease() {
 }
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
-let trips         = {};  // trip_id → trip object
-let stops         = {};  // stop_id → { name, lat, lon }
-let routesByStop  = {};  // stop_id → [trip_ids]
-let calendarIndex = {};  // date ISO → [trip_ids]  (dispo uniquement, tel que généré par l'ingest)
-let allCalendarIndex = {}; // date ISO → [trip_ids]  (TOUS les trips, construit au chargement)
+let tripsBuffer   = null;     // Stocke le Buffer brut de 12 octets par trajet
+let TOTAL_TRIPS   = 0;        // tripsBuffer.length / 12
+let stops         = {};       // stop_id → { name, lat, lon }
+let calendarIndex = {};       // date ISO → [offset binaire] (trips dispo)
+let allCalendarIndex = {};    // date ISO → [offset binaire] (tous les trips)
 let meta          = {};
-let tripMeta      = {};  // tripNumId → {date, train_no} (metadata légère)
+let tripMeta      = {};       // index binaire i → { train_no } (si besoin, ou reconstruit)
 
 let stopsIndex = [];   // pour l'autocomplétion
 let cityIndex  = new Map();
@@ -99,97 +99,96 @@ function loadJSON(filename) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
-// ─── Décompression des données (numéros → objets enrichis) ───────────────────
-// Les données générées par tgvmax-ingest.js sont encodées numériquement :
-// - stops: {"0": {name, lat, lon}, "1": {...}, ...}  (clés = indices string)
-// - trips: {"0": {o: 2, d: 5, t_dep: 1234, t_arr: 5678, dispo: 1}, ...}
-// - routesByStop: {"0": [0, 3, 7], "2": [1, 5], ...}  (clés = indices stops)
-//
-// IMPORTANT : on garde les indices numériques (sous forme de strings) comme
-// stop_ids partout. "0", "1", "2"... sont les vrais IDs dans tout le système.
-// Inutile de les renommer : routesByStop utilise déjà ces clés numériques.
-function decompressTripsAndStops(tripsCompressed, stopsDict) {
-  // stops reste tel quel : {"0": {name, lat, lon}, ...}
-  // On enrichit juste chaque stop avec son id pour la résolution de noms.
-  const stopsDecompressed = {};
-  for (const [numId, stopData] of Object.entries(stopsDict)) {
-    stopsDecompressed[numId] = { ...stopData, id: numId };
-  }
-
-  // Décompresser trips : {o, d, t_dep, t_arr, dispo} → objet enrichi
-  // Les origin_id / dest_id sont les indices numériques STRING ("0", "2"...)
-  // qui correspondent directement aux clés de stopsDecompressed et routesByStop.
-  const tripsDecompressed = {};
-  for (const [tripNumId, tripCompressed] of Object.entries(tripsCompressed)) {
-    tripsDecompressed[tripNumId] = {
-      trip_id:    tripNumId,
-      origin_id:  String(tripCompressed.o),
-      dest_id:    String(tripCompressed.d),
-      dep_time:   tripCompressed.t_dep,
-      arr_time:   tripCompressed.t_arr,
-      dispo:      tripCompressed.dispo === 1,
-      operator:   'TGVMAX',
-      train_type: 'TGVMAX',
-    };
-  }
-
-  return { trips: tripsDecompressed, stops: stopsDecompressed };
-}
-
-// ─── Chargement ───────────────────────────────────────────────────────────────
+// ─── Initialisation du moteur (Version Binaire & Hybride) ─────────────────────
 
 function initEngine() {
-  console.log('\n🚄 Chargement moteur TGVmax...');
+  console.log('\n🚄 Chargement moteur TGVmax (Format Binaire)...');
   const t = Date.now();
 
-  // Charger les fichiers bruts
-  const tripsCompressed = loadJSON('trips.json');
-  const stopsDict       = loadJSON('stops.json');
-  routesByStop          = loadJSON('routes_by_stop.json');
-  calendarIndex         = loadJSON('calendar_index.json');
-  meta                  = loadJSON('meta.json');
-  
-  // Charger tripMeta si dispo (nouveau fichier d'optimisation)
   try {
-    tripMeta = loadJSON('trip_meta.json');
-  } catch (e) {
-    // Si fichier absent, c'est OK (anciennes données)
-    tripMeta = {};
+    // 1. Chargement des JSON légers de structure
+    stops         = loadJSON('stops.json');
+    meta          = loadJSON('meta.json');
+    
+    // Pour mapper les dates et numéros de trains de chaque index binaire
+    try {
+      tripMeta = loadJSON('trip_meta.json');
+    } catch (e) {
+      tripMeta = {};
+    }
+
+    // 2. Chargement du Buffer binaire principal (trips.bin)
+    const binPath = path.join(DATA_DIR, 'trips.bin');
+    if (!fs.existsSync(binPath)) {
+      throw new Error('Fichier binaire trips.bin manquant : ' + binPath);
+    }
+    tripsBuffer = fs.readFileSync(binPath);
+    TOTAL_TRIPS = tripsBuffer.length / 12;
+
+    // 3. Construction des index temporels (calendarIndex & allCalendarIndex)
+    // Au lieu de stocker des milliers d'objets JSON en RAM, on mappe des index de
+    // position binaire (offset = i * 12) sur les dates correspondantes.
+    allCalendarIndex = {};
+    calendarIndex = {};
+
+    for (let i = 0; i < TOTAL_TRIPS; i++) {
+      const metaItem = tripMeta[i];
+      if (!metaItem) continue;
+
+      const dateKey = metaItem.date; // "2026-07-16"
+      if (!dateKey) continue;
+
+      // Lecture du bit de disponibilité à l'offset + 8
+      const timeValue = tripsBuffer.readUInt32BE(i * 12 + 8);
+      const dispo = (timeValue & 0x80000000) !== 0;
+
+      // Tous les trajets
+      if (!allCalendarIndex[dateKey]) allCalendarIndex[dateKey] = [];
+      allCalendarIndex[dateKey].push(i);
+
+      // Trajets disponibles uniquement
+      if (dispo) {
+        if (!calendarIndex[dateKey]) calendarIndex[dateKey] = [];
+        calendarIndex[dateKey].push(i);
+      }
+    }
+
+    // 4. Reconstruction de l'index d'autocomplétion
+    buildStopsIndex();
+
+    // 5. Petit check de cohérence (Lecture des 3 premiers trajets en binaire)
+    const sampleSize = Math.min(TOTAL_TRIPS, 3);
+    for (let i = 0; i < sampleSize; i++) {
+      const offset = i * 12;
+      const originUic = tripsBuffer.readUInt32BE(offset);
+      const destUic   = tripsBuffer.readUInt32BE(offset + 4);
+      const timeVal   = tripsBuffer.readUInt32BE(offset + 8);
+      
+      const dispo     = (timeVal & 0x80000000) !== 0;
+      const timestamp = timeVal & 0x7FFFFFFF;
+      const timeStr   = new Date(timestamp * 1000).toISOString();
+
+      const origName  = stops[originUic]?.name || `UIC ${originUic}`;
+      const destName  = stops[destUic]?.name || `UIC ${destUic}`;
+
+      console.log(`  [CHECK binaire] trip #${i}: ${origName} → ${destName} le ${timeStr} (dispo TGVmax=${dispo})`);
+    }
+
+    engineLoadMs   = Date.now() - t;
+    engineLoadedAt = new Date().toISOString();
+    engineReady    = true;
+    console.log(`\n✅ Moteur binaire initialisé avec succès en ${engineLoadMs}ms !`);
+    console.log(`📦 Mémoire utilisée : ~${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)} MB RAM`);
+    console.log(`🚄 Total trajets actifs : ${TOTAL_TRIPS.toLocaleString()}`);
+
+  } catch (err) {
+    console.error('❌ Erreur lors de l\'initialisation du moteur :', err);
+    engineReady = false;
+    engineError = err.message;
   }
-
-  // Décompresser trips & stops (numéros → vrais IDs)
-  console.log('  Décompression données optimisées...');
-  const decompressed = decompressTripsAndStops(tripsCompressed, stopsDict);
-  trips = decompressed.trips;
-  stops = decompressed.stops;
-
-  // Construire un index date → [trip_ids] pour TOUS les trips (dispo ou non)
-  allCalendarIndex = {};
-  for (const [tripId, trip] of Object.entries(trips)) {
-    const dateKey = tripMeta[tripId] ? tripMeta[tripId].date : null;
-    if (!dateKey) continue;
-    if (!allCalendarIndex[dateKey]) allCalendarIndex[dateKey] = [];
-    allCalendarIndex[dateKey].push(tripId);
-  }
-  console.log('  Index all-trips : ' + Object.keys(allCalendarIndex).length + ' dates');
-
-  // Vérification de cohérence : un sample de trip doit pointer vers un stop valide
-  const sampleTripIds = Object.keys(trips).slice(0, 3);
-  for (const tid of sampleTripIds) {
-    const t = trips[tid];
-    const origName = stops[t.origin_id]?.name || '⚠️ INTROUVABLE';
-    const destName = stops[t.dest_id]?.name   || '⚠️ INTROUVABLE';
-    console.log(`  [CHECK] trip ${tid}: ${origName} (${t.origin_id}) → ${destName} (${t.dest_id}) dispo=${t.dispo}`);
-  }
-
-  buildStopsIndex();
-
-  const totalTrips = Object.keys(trips).length;
-  engineLoadMs   = Date.now() - t;
-  engineLoadedAt = new Date().toISOString();
-  engineReady    = true;
-  console.log('✅ Prêt en ' + engineLoadMs + 'ms — ' + totalTrips.toLocaleString() + ' trajets TGVmax chargés\n');
 }
+
+
 
 // ─── Autocomplétion ───────────────────────────────────────────────────────────
 
