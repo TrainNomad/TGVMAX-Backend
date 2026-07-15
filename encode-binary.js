@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * 🚀 ENCODEUR BINAIRE (CORRIGÉ)
+ * 🚀 ENCODEUR BINAIRE (CORRIGÉ & SÉCURISÉ)
  * Convertit trips.json (produit par tgvmax-ingest.js) → trips.bin + trip_meta.json
  * * Format binaire : 12 octets par trajet
  * - Bytes 0-3   : UIC gare de départ (UInt32BE)
@@ -53,8 +53,7 @@ function encodeToBinary() {
   let encoded = 0;
   let skipped = 0;
 
-  // Si vous avez un fichier intermédiaire trip_meta.json généré par votre ingestion
-  // pour connaître la date de chaque tripId (puisque trips.json ne contient pas la date brute)
+  // Récupération de l'ancien index de métadonnées s'il existe pour conserver la date et le numéro de train
   let initialTripMeta = {};
   if (fs.existsSync(TRIP_META)) {
     try {
@@ -69,7 +68,6 @@ function encodeToBinary() {
     const trip = trips[tripId];
 
     // Résolution des IDs internes de stops vers de vrais codes UIC à l'aide de stops.json
-    // stops[internalId] contient le code UIC réel (ex: "87391003")
     const originUicRaw = stops[trip.o] ? (stops[trip.o].uic || trip.o) : trip.o;
     const destUicRaw   = stops[trip.d] ? (stops[trip.d].uic || trip.d) : trip.d;
 
@@ -101,12 +99,13 @@ function encodeToBinary() {
       continue;
     }
 
-    // Masquer le bit de poids fort pour le timestamp (31 bits)
-    let timeValue = (timestamp & 0x7FFFFFFF) >>> 0; // 💡 Ajout de >>> 0 ici
+    // 💡 FORCE LE TIMESTAMP EN ENTIER NON-SIGNÉ 32-BITS
+    let timeValue = (timestamp & 0x7FFFFFFF) >>> 0;
 
-    // Bit 31 = Happy Card (disponibilité)
-    if (trip.dispo === 1 || trip.dispo === true || trip.od_happy_card === 'OUI' || trip.od_happy_card === true) {
-      timeValue = (timeValue | 0x80000000) >>> 0; // 💡 Ajout de >>> 0 ici pour garder la valeur positive
+    // Bit 31 = Disponibilité TGVmax (happy card)
+    if (trip.dispo === 1 || trip.dispo === true) {
+      // 💡 FORCE LE RÉSULTAT DU BITWISE OR EN ENTIER NON-SIGNÉ AVEC >>> 0
+      timeValue = (timeValue | 0x80000000) >>> 0;
     }
 
     // Écrire les 12 octets dans le buffer (Big-Endian)
