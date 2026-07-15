@@ -1,10 +1,9 @@
 'use strict';
 
 /**
- * 🚀 ENCODEUR BINAIRE
+ * 🚀 ENCODEUR BINAIRE (CORRIGÉ)
  * Convertit trips.json (produit par tgvmax-ingest.js) → trips.bin + trip_meta.json
- * 
- * Format binaire : 12 octets par trajet
+ * * Format binaire : 12 octets par trajet
  * - Bytes 0-3   : UIC gare de départ (UInt32BE)
  * - Bytes 4-7   : UIC gare d'arrivée (UInt32BE)
  * - Bytes 8-11  : Timestamp UNIX 31 bits + bit de poids fort = Happy Card
@@ -15,27 +14,32 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, 'engine_data');
 const TRIPS_JSON = path.join(DATA_DIR, 'trips.json');
+const STOPS_JSON = path.join(DATA_DIR, 'stops.json'); // requis pour obtenir les vrais UIC
 const TRIPS_BIN = path.join(DATA_DIR, 'trips.bin');
 const TRIP_META = path.join(DATA_DIR, 'trip_meta.json');
 
 function encodeToBinary() {
   console.log('⏳ Début de l\'encodage binaire trips.json → trips.bin...\n');
 
-  // 1. Vérifier que trips.json existe
+  // 1. Vérifier que les fichiers requis existent
   if (!fs.existsSync(TRIPS_JSON)) {
     console.error(`❌ Fichier trips.json introuvable : ${TRIPS_JSON}`);
-    console.error('   (Avez-vous lancé npm run build/ingest d\'abord ?)');
+    process.exit(1);
+  }
+  if (!fs.existsSync(STOPS_JSON)) {
+    console.error(`❌ Fichier stops.json introuvable : ${STOPS_JSON}`);
     process.exit(1);
   }
 
-  // 2. Parser trips.json
-  let trips;
+  // 2. Parser trips.json et stops.json
+  let trips, stops;
   try {
-    const rawData = fs.readFileSync(TRIPS_JSON, 'utf8');
-    trips = JSON.parse(rawData);
-    console.log(`✅ trips.json parsé : ${Object.keys(trips).length} trajets trouvés\n`);
+    trips = JSON.parse(fs.readFileSync(TRIPS_JSON, 'utf8'));
+    stops = JSON.parse(fs.readFileSync(STOPS_JSON, 'utf8'));
+    console.log(`✅ trips.json parsé : ${Object.keys(trips).length} trajets trouvés`);
+    console.log(`✅ stops.json parsé : ${Object.keys(stops).length} gares trouvées\n`);
   } catch (e) {
-    console.error(`❌ Erreur parsing trips.json: ${e.message}`);
+    console.error(`❌ Erreur parsing des sources: ${e.message}`);
     process.exit(1);
   }
 
@@ -49,27 +53,48 @@ function encodeToBinary() {
   let encoded = 0;
   let skipped = 0;
 
+  // Si vous avez un fichier intermédiaire trip_meta.json généré par votre ingestion
+  // pour connaître la date de chaque tripId (puisque trips.json ne contient pas la date brute)
+  let initialTripMeta = {};
+  if (fs.existsSync(TRIP_META)) {
+    try {
+      initialTripMeta = JSON.parse(fs.readFileSync(TRIP_META, 'utf8'));
+    } catch (e) {
+      console.warn("⚠️ Impossible de lire l'ancien trip_meta.json, on va tenter d'estimer.");
+    }
+  }
+
   for (let i = 0; i < totalTrips; i++) {
     const tripId = tripIds[i];
     const trip = trips[tripId];
 
-    // Extraire les UIC (accepter string ou number)
-    const originUic = parseInt(trip.origin_id, 10) || 0;
-    const destUic = parseInt(trip.dest_id, 10) || 0;
+    // Résolution des IDs internes de stops vers de vrais codes UIC à l'aide de stops.json
+    // stops[internalId] contient le code UIC réel (ex: "87391003")
+    const originUicRaw = stops[trip.o] ? (stops[trip.o].uic || trip.o) : trip.o;
+    const destUicRaw   = stops[trip.d] ? (stops[trip.d].uic || trip.d) : trip.d;
 
-    // Valider les données
-    if (!originUic || !destUic || !trip.date || !trip.time) {
+    const originUic = parseInt(originUicRaw, 10) || 0;
+    const destUic = parseInt(destUicRaw, 10) || 0;
+
+    // Récupération de la date associée au trajet
+    const dateStr = initialTripMeta[tripId] ? initialTripMeta[tripId].date : null;
+
+    // Validation
+    if (!originUic || !destUic || !dateStr || trip.t_dep === undefined) {
       skipped++;
       continue;
     }
 
+    // Reconstruire l'heure de départ depuis les secondes (trip.t_dep)
+    const depSeconds = trip.t_dep;
+    const hours = Math.floor(depSeconds / 3600);
+    const minutes = Math.floor((depSeconds % 3600) / 60);
+
     // Construire le timestamp UNIX
-    // trip.date: "2026-07-20", trip.time: "18:05"
     let timestamp = 0;
     try {
-      const [year, month, day] = trip.date.split('-').map(Number);
-      const [hour, minute] = trip.time.split(':').map(Number);
-      const dateObj = new Date(year, month - 1, day, hour, minute, 0);
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day, hours, minutes, 0);
       timestamp = Math.floor(dateObj.getTime() / 1000);
     } catch (e) {
       skipped++;
@@ -79,34 +104,30 @@ function encodeToBinary() {
     // Masquer le bit de poids fort pour le timestamp (31 bits)
     let timeValue = timestamp & 0x7FFFFFFF;
 
-    // Bit 31 = Happy Card (disponibilité)
-    // od_happy_card: "OUI" ou "NON" dans les données SNCF
-    if (trip.od_happy_card === 'OUI' || trip.od_happy_card === true) {
+    // Bit 31 = Disponibilité TGVmax (happy card)
+    if (trip.dispo === 1 || trip.dispo === true) {
       timeValue |= 0x80000000;
     }
 
-    // Écrire les 12 octets dans le buffer (Big-Endian pour lisibilité)
+    // Écrire les 12 octets dans le buffer (Big-Endian)
     const offset = encoded * 12;
-    buffer.writeUInt32BE(originUic, offset);           // Bytes 0-3
-    buffer.writeUInt32BE(destUic, offset + 4);         // Bytes 4-7
-    buffer.writeUInt32BE(timeValue, offset + 8);       // Bytes 8-11
+    buffer.writeUInt32BE(originUic, offset);           // Bytes 0-3 : Gare Départ
+    buffer.writeUInt32BE(destUic, offset + 4);         // Bytes 4-7 : Gare Arrivée
+    buffer.writeUInt32BE(timeValue, offset + 8);       // Bytes 8-11: Temps + Dispo
 
-    // Enregistrer les métadonnées pour les requêtes d'indexation temporelle
+    // Enregistrer les métadonnées pour l'API du serveur
     tripMetadata[encoded] = {
       trip_id: tripId,
-      date: trip.date,
-      train_no: trip.train_no || '',
-      entity: trip.entity || '',
-      axe: trip.axe || ''
+      date: dateStr,
+      train_no: initialTripMeta[tripId] ? (initialTripMeta[tripId].train_no || '') : ''
     };
 
     encoded++;
   }
 
-  // 4. Écrire les fichiers binaires et de métadonnées
+  // 4. Écrire les fichiers binaires et de métadonnées finaux
   console.log(`✅ ${encoded} trajets encodés / ${skipped} ignorés\n`);
 
-  // Réallouer le buffer à la taille exacte (au cas où)
   const finalBuffer = buffer.slice(0, encoded * 12);
 
   fs.writeFileSync(TRIPS_BIN, finalBuffer);
@@ -118,16 +139,13 @@ function encodeToBinary() {
   console.log(`✅ Métadonnées créées : ${TRIP_META}`);
   console.log(`   Entrées : ${Object.keys(tripMetadata).length}\n`);
 
-  // 5. (Optionnel) Nettoyer l'ancien trips.json pour économiser l'espace
-  // Décommenter si vous voulez supprimer le JSON après encodage
-  /*
+  // Nettoyage de l'ancien trips.json pour économiser la mémoire de stockage
   try {
     fs.unlinkSync(TRIPS_JSON);
     console.log('🧹 Ancien fichier trips.json supprimé pour économiser l\'espace.\n');
   } catch (e) {
-    console.warn('⚠️  Impossible de supprimer trips.json (fichier verrouillé ?)\n');
+    console.warn('⚠️ Impossible de supprimer trips.json\n');
   }
-  */
 
   console.log('✨ Encodage binaire terminé avec succès !');
 }
