@@ -102,11 +102,11 @@ function encodeToBinary() {
     }
 
     // Masquer le bit de poids fort pour le timestamp (31 bits)
-    let timeValue = timestamp & 0x7FFFFFFF;
+    let timeValue = (timestamp & 0x7FFFFFFF) >>> 0; // 💡 Ajout de >>> 0 ici
 
-    // Bit 31 = Disponibilité TGVmax (happy card)
-    if (trip.dispo === 1 || trip.dispo === true) {
-      timeValue |= 0x80000000;
+    // Bit 31 = Happy Card (disponibilité)
+    if (trip.dispo === 1 || trip.dispo === true || trip.od_happy_card === 'OUI' || trip.od_happy_card === true) {
+      timeValue = (timeValue | 0x80000000) >>> 0; // 💡 Ajout de >>> 0 ici pour garder la valeur positive
     }
 
     // Écrire les 12 octets dans le buffer (Big-Endian)
