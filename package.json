@@ -6,8 +6,9 @@
   },
   "scripts": {
     "ingest": "node tgvmax-ingest.js",
-    "stations": "node build-stations-index.js",
-    "build": "node tgvmax-ingest.js && node build-stations-index.js",
+    "encode": "node encode-binary.js",
+    "build-stations": "node build-stations-json.js",
+    "build": "npm run ingest && npm run encode && npm run build-stations",
     "start": "node --max-old-space-size=450 server.js",
     "start:full": "node --max-old-space-size=600 server-fusion.js"
   },
