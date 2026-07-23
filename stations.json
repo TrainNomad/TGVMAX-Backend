@@ -2032,5 +2032,11 @@
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
+  },
+  "340": {
+    "name": "Station 340",
+    "lat": 0,
+    "lon": 0,
+    "sncf_id": ""
   }
 }
