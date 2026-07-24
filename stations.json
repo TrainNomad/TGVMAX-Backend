@@ -2008,35 +2008,5 @@
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
-  },
-  "336": {
-    "name": "Station 336",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "337": {
-    "name": "Station 337",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "338": {
-    "name": "Station 338",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "339": {
-    "name": "Station 339",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "340": {
-    "name": "Station 340",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
   }
 }
