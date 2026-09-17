@@ -1828,5 +1828,11 @@
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
+  },
+  "306": {
+    "name": "Station 306",
+    "lat": 0,
+    "lon": 0,
+    "sncf_id": ""
   }
 }
