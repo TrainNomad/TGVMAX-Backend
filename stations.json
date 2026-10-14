@@ -581,12 +581,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "98": {
-    "name": "Station 98",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "99": {
     "name": "Station 99",
     "lat": 0,
@@ -631,12 +625,6 @@
   },
   "106": {
     "name": "Station 106",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "107": {
-    "name": "Station 107",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -785,18 +773,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "132": {
-    "name": "Station 132",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "133": {
-    "name": "Station 133",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "134": {
     "name": "Station 134",
     "lat": 0,
@@ -859,12 +835,6 @@
   },
   "144": {
     "name": "Station 144",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "145": {
-    "name": "Station 145",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -985,12 +955,6 @@
   },
   "165": {
     "name": "Station 165",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "166": {
-    "name": "Station 166",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1163,26 +1127,8 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "195": {
-    "name": "Station 195",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "196": {
-    "name": "Station 196",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "197": {
     "name": "Station 197",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "198": {
-    "name": "Station 198",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1283,12 +1229,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "215": {
-    "name": "Station 215",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "216": {
     "name": "Station 216",
     "lat": 0,
@@ -1297,18 +1237,6 @@
   },
   "217": {
     "name": "Station 217",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "218": {
-    "name": "Station 218",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "219": {
-    "name": "Station 219",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1397,12 +1325,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "234": {
-    "name": "Station 234",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "235": {
     "name": "Station 235",
     "lat": 0,
@@ -1421,20 +1343,8 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "238": {
-    "name": "Station 238",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "239": {
     "name": "Station 239",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "240": {
-    "name": "Station 240",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1499,38 +1409,8 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "251": {
-    "name": "Station 251",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "252": {
-    "name": "Station 252",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "253": {
-    "name": "Station 253",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "254": {
-    "name": "Station 254",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "255": {
     "name": "Station 255",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "256": {
-    "name": "Station 256",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1577,18 +1457,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "264": {
-    "name": "Station 264",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "265": {
-    "name": "Station 265",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "266": {
     "name": "Station 266",
     "lat": 0,
@@ -1597,24 +1465,6 @@
   },
   "267": {
     "name": "Station 267",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "268": {
-    "name": "Station 268",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "269": {
-    "name": "Station 269",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "270": {
-    "name": "Station 270",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1643,24 +1493,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "275": {
-    "name": "Station 275",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "276": {
-    "name": "Station 276",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "277": {
-    "name": "Station 277",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "278": {
     "name": "Station 278",
     "lat": 0,
@@ -1669,18 +1501,6 @@
   },
   "279": {
     "name": "Station 279",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "280": {
-    "name": "Station 280",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "281": {
-    "name": "Station 281",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1715,18 +1535,6 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "287": {
-    "name": "Station 287",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "288": {
-    "name": "Station 288",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "289": {
     "name": "Station 289",
     "lat": 0,
@@ -1741,30 +1549,6 @@
   },
   "291": {
     "name": "Station 291",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "292": {
-    "name": "Station 292",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "293": {
-    "name": "Station 293",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "294": {
-    "name": "Station 294",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "295": {
-    "name": "Station 295",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
@@ -1811,50 +1595,8 @@
     "lon": 0,
     "sncf_id": ""
   },
-  "303": {
-    "name": "Station 303",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "304": {
-    "name": "Station 304",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
   "305": {
     "name": "Station 305",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "306": {
-    "name": "Station 306",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "307": {
-    "name": "Station 307",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "308": {
-    "name": "Station 308",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "309": {
-    "name": "Station 309",
-    "lat": 0,
-    "lon": 0,
-    "sncf_id": ""
-  },
-  "310": {
-    "name": "Station 310",
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
