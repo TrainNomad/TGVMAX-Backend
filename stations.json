@@ -1864,5 +1864,11 @@
     "lat": 0,
     "lon": 0,
     "sncf_id": ""
+  },
+  "312": {
+    "name": "Station 312",
+    "lat": 0,
+    "lon": 0,
+    "sncf_id": ""
   }
 }
